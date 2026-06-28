@@ -13,7 +13,9 @@
   <main>
     <section class="intro" aria-labelledby="hero-title"><div><h1 id="hero-title">מתכונים טובים.<br>בלי בלגן.</h1><p>כל מה שצריך כדי לבשל — ברור, קריא ובמקום אחד.</p></div><button class="primary-btn intro-add" data-open-form>＋ הוספת מתכון חדש</button></section>
     <section class="browse" id="recipes" aria-labelledby="recipes-title">
-      <div class="search-row"><label class="search-box"><span>⌕</span><span class="sr-only">חיפוש מתכון</span><input id="search" type="search" placeholder="חיפוש מתכון או מצרך" autocomplete="off"></label><div class="filters" role="group" aria-label="סינון"><button class="filter-chip active" data-category="הכול">הכול</button><button class="filter-chip" data-category="עיקריות">עיקריות</button><button class="filter-chip" data-category="מהיר">עד 20 דקות</button></div></div>
+      <div class="search-row"><label class="search-box"><span>⌕</span><span class="sr-only">חיפוש מתכון</span><input id="search" type="search" placeholder="חיפוש מתכון, מצרך או תגית" autocomplete="off"></label><div class="filters" role="group" aria-label="סינון"><button class="filter-chip active" data-category="הכול">הכול</button><button class="filter-chip" data-category="עיקריות">עיקריות</button><button class="filter-chip" data-category="מהיר">עד 20 דקות</button></div></div>
+      <div class="tag-filters" id="tag-filters" aria-label="סינון לפי תגית"></div>
+      <p class="sync-status" id="sync-status" role="status"></p>
       <div class="section-heading"><h2 id="recipes-title">כל המתכונים</h2><p id="recipe-count" aria-live="polite"></p></div>
       <div class="recipe-grid" id="recipe-grid"></div>
       <div class="empty-state" id="empty-state" hidden><h3>לא נמצאו מתכונים</h3><p>נסו חיפוש אחר או הוסיפו מתכון חדש.</p><button class="primary-btn" data-open-form>הוספת מתכון</button></div>
@@ -24,7 +26,7 @@
   <div class="drawer-layer" id="form-drawer" hidden><div class="modal-backdrop" data-close-form></div><aside class="form-drawer" role="dialog" aria-modal="true" aria-labelledby="form-title">
     <header class="drawer-header"><div><h2 id="form-title">מתכון חדש</h2><p>ממלאים רק מה שצריך. הטיוטה נשמרת אוטומטית.</p></div><button class="icon-btn" data-close-form aria-label="סגירה">×</button></header>
     <form id="recipe-form">
-      <section class="form-section"><h3>פרטים בסיסיים</h3><label>שם המתכון <b>*</b><input name="title" required maxlength="100" placeholder="למשל: הפסטה של יום שישי"></label><label>תיאור קצר <span class="optional">לא חובה</span><textarea name="summary" maxlength="180" rows="2" placeholder="משפט אחד שמתאר את המנה"></textarea></label><div class="form-row thirds"><label>קטגוריה<select name="category"><option>עיקריות</option><option>סלטים</option><option>מאפים</option><option>קינוחים</option><option>אחר</option></select></label><label>זמן בדקות<input name="time" type="number" min="1" max="999" value="30"></label><label>קושי<select name="difficulty"><option>קל</option><option>בינוני</option><option>למתקדמים</option></select></label></div></section>
+      <section class="form-section"><h3>פרטים בסיסיים</h3><label>שם המתכון <b>*</b><input name="title" required maxlength="100" placeholder="למשל: הפסטה של יום שישי"></label><label>תיאור קצר <span class="optional">לא חובה</span><textarea name="summary" maxlength="180" rows="2" placeholder="משפט אחד שמתאר את המנה"></textarea></label><label>תגיות <span class="optional">מפרידים בפסיקים</span><input name="tags" maxlength="120" placeholder="מהיר, עוף, ארוחת ערב"></label><div class="form-row thirds"><label>קטגוריה<select name="category"><option>עיקריות</option><option>סלטים</option><option>מאפים</option><option>קינוחים</option><option>אחר</option></select></label><label>זמן בדקות<input name="time" type="number" min="1" max="999" value="30"></label><label>קושי<select name="difficulty"><option>קל</option><option>בינוני</option><option>למתקדמים</option></select></label></div></section>
       <section class="form-section"><h3>מצרכים</h3><p class="section-help">כל מצרך בשורה נפרדת.</p><div id="ingredients-list" class="dynamic-list"></div><button class="add-row-btn" type="button" data-add-ingredient>＋ הוספת מצרך</button></section>
       <section class="form-section"><h3>אופן ההכנה</h3><p class="section-help">שלב אחד בכל שורה.</p><div id="steps-list" class="dynamic-list"></div><button class="add-row-btn" type="button" data-add-step>＋ הוספת שלב</button></section>
       <section class="form-section compact-section"><h3>תמונה <span class="optional">לא חובה</span></h3><label class="image-upload" id="image-upload"><input id="image-input" name="image" type="file" accept="image/jpeg,image/png,image/webp"><img id="image-preview" alt="תצוגה מקדימה" hidden><span id="upload-copy"><strong>＋ בחירת תמונה</strong><small>JPG, PNG או WEBP</small></span></label></section>
@@ -32,5 +34,5 @@
       <div class="form-actions"><button class="primary-btn submit-btn" type="submit">שמירת המתכון</button><button class="text-btn" type="button" data-close-form>ביטול</button><span class="draft-note" id="draft-note">הטיוטה נשמרת אוטומטית</span></div>
     </form>
   </aside></div>
-  <div class="toast" id="toast" role="status" aria-live="polite"></div><script src="app.js"></script>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div><script src="config.js"></script><script src="app.js"></script>
 </body></html>
