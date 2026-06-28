@@ -189,7 +189,7 @@ function openForm() {
 function resizeImage(file) {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith("image/")) return reject(new Error("יש לבחור קובץ תמונה"));
-    if (file.size > 8 * 1024 * 1024) return reject(new Error("התמונה גדולה מדי"));
+    if (file.size > 3 * 1024 * 1024) return reject(new Error("התמונה גדולה מדי — אפשר להעלות עד 3MB"));
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("לא הצלחנו לקרוא את התמונה"));
     reader.onload = () => {
@@ -223,7 +223,7 @@ $$('[data-category]').forEach(button => button.addEventListener("click", () => {
 }));
 $$('[data-view]').forEach(button => button.addEventListener("click", () => {
   currentView = button.dataset.view; $$('[data-view]').forEach(x => x.classList.toggle("active", x === button));
-  $("#recipes-title").textContent = currentView === "favorites" ? "המתכונים ששמרת" : "מתכונים שכדאי לנסות";
+  $("#recipes-title").textContent = currentView === "favorites" ? "המתכונים ששמרת" : "כל המתכונים";
   renderRecipes(); location.hash = "recipes";
 }));
 $("[data-add-ingredient]").addEventListener("click", () => { addDynamicRow("ingredient"); saveDraft(); });
