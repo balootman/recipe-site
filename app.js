@@ -98,20 +98,42 @@ function normalizeSharedRecipe(row) {
   };
 }
 
-async function loadSharedRecipes() {
+let syncInProgress = false;
+
+async function migrateLocalRecipes() {
+  let pending = safeJSON(localStorage.getItem(STORAGE_KEY), []);
+  if (!pending.length) return 0;
+  let migrated = 0;
+  setSyncStatus(`מעבירים ${pending.length} מתכונים מהמכשיר לענן…`);
+  for (const recipe of [...pending]) {
+    const candidate = { ...recipe, tags: recipe.tags || [] };
+    if (candidate.image?.startsWith("data:")) candidate.image = await uploadSharedImage(candidate.image);
+    await createSharedRecipe(candidate);
+    pending = pending.filter(item => item.id !== recipe.id);
+    pending.length ? localStorage.setItem(STORAGE_KEY, JSON.stringify(pending)) : localStorage.removeItem(STORAGE_KEY);
+    migrated += 1;
+  }
+  return migrated;
+}
+
+async function loadSharedRecipes({ quiet = false } = {}) {
   if (!SHARED_ENABLED) {
-    setSyncStatus("מצב מקומי — יש לחבר מסד נתונים כדי לשתף מתכונים בין משתמשים.");
+    setSyncStatus("מצב מקומי — המתכונים נשמרים רק במכשיר הזה.", true);
     renderTagFilters(); renderRecipes(); return;
   }
-  setSyncStatus("טוענים מתכונים משותפים…");
+  if (syncInProgress) return;
+  syncInProgress = true;
+  if (!quiet) setSyncStatus("טוענים מתכונים משותפים…");
   try {
+    const migrated = await migrateLocalRecipes();
     const rows = await supabaseRequest("/rest/v1/recipes?select=*&order=created_at.desc&limit=200");
     customRecipes = rows.map(normalizeSharedRecipe);
-    setSyncStatus(""); renderTagFilters(); renderRecipes();
-  } catch (error) {
-    console.error(error); setSyncStatus("לא הצלחנו לטעון את המתכונים המשותפים. נסו לרענן.", true);
+    setSyncStatus(migrated ? `${migrated} מתכונים מהמכשיר הועברו ושמורים לכולם.` : "מסונכרן לכל המכשירים");
     renderTagFilters(); renderRecipes();
-  }
+  } catch (error) {
+    console.error(error); setSyncStatus("לא הצלחנו להסתנכרן. בדקו את החיבור ונסו לרענן.", true);
+    renderTagFilters(); renderRecipes();
+  } finally { syncInProgress = false; }
 }
 
 async function uploadSharedImage(dataUrl) {
@@ -351,6 +373,7 @@ $("#recipe-form").addEventListener("submit", async event => {
   const submit = $(".submit-btn", form); submit.disabled = true; submit.textContent = "שומרים…";
   try {
     let savedRecipe = recipe;
+    let sharedSave = SHARED_ENABLED;
     if (SHARED_ENABLED) {
       setSyncStatus("שומרים את המתכון לכולם…");
       savedRecipe.image = await uploadSharedImage(uploadedImage);
@@ -361,7 +384,8 @@ $("#recipe-form").addEventListener("submit", async event => {
       catch { throw new Error("אין מספיק מקום לשמירת התמונה. נסו תמונה קטנה יותר."); }
     }
     customRecipes.unshift(savedRecipe); localStorage.removeItem(DRAFT_KEY);
-    closeLayer("#form-drawer"); renderTagFilters(); renderRecipes(); showToast("המתכון נוסף וגלוי לכולם! 🎉");
+    closeLayer("#form-drawer"); renderTagFilters(); renderRecipes();
+    showToast(sharedSave ? "המתכון נוסף וגלוי לכולם! 🎉" : "המתכון נשמר רק במכשיר הזה");
     setTimeout(() => openRecipe(savedRecipe.id), 350);
   } catch (error) {
     console.error(error); setSyncStatus("שמירת המתכון נכשלה. נסו שוב.", true); showToast("לא הצלחנו לשמור את המתכון");
@@ -373,3 +397,8 @@ document.addEventListener("keydown", event => {
 });
 
 loadSharedRecipes();
+window.addEventListener("focus", () => loadSharedRecipes({ quiet: true }));
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") loadSharedRecipes({ quiet: true });
+});
+setInterval(() => loadSharedRecipes({ quiet: true }), 60000);
