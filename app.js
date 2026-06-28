@@ -3,7 +3,7 @@ const STARTER_RECIPES = [
     id: "starter-chicken-soy",
     title: "חזה עוף רך ב־10 דקות",
     summary: "עסיסי, מהיר וטעים גם למחרת במיקרו — ברוטב סויה, שום ותבלינים.",
-    category: "עיקריות", time: 10, difficulty: "קל", image: "assets/chicken-soy.png",
+    category: "עיקריות", time: 10, difficulty: "קל", tags: ["מהיר", "עוף", "מחבת"], image: "assets/chicken-soy.png",
     ingredients: [
       "1 ק״ג חזה עוף, חתוך לשניצלים או לקוביות", "2 כפות קורנפלור", "רוטב סויה, לפי הצורך",
       "1½ כפות שמן זית", "2 כפיות שום כתוש", "אבקת שום, לפי הטעם", "צ׳ילי חריף, לפי הטעם",
@@ -24,7 +24,7 @@ const STARTER_RECIPES = [
     id: "starter-chicken-sweet-potato",
     title: "חזה עוף, בטטה וערמונים בסיר אחד",
     summary: "ארוחה ביתית קלה בסיר אחד, עם בטטה, ערמונים ורוטב מתקתק.",
-    category: "עיקריות", time: 45, difficulty: "קל", image: "assets/chicken-sweet-potato.png",
+    category: "עיקריות", time: 45, difficulty: "קל", tags: ["עוף", "סיר אחד", "ארוחת ערב"], image: "assets/chicken-sweet-potato.png",
     ingredients: [
       "חזה או פילה עוף, בכמות הרצויה — אפשר גם פרוסות", "2 בצלים או בצל אחד גדול מאוד, חתוכים לרצועות",
       "ערמונים, לפי הטעם", "1–2 בטטות, חתוכות לקוביות", "שמן לטיגון", "סילאן, לפי הטעם",
@@ -46,18 +46,97 @@ const STARTER_RECIPES = [
 const STORAGE_KEY = "bamitbach-recipes-v1";
 const FAVORITES_KEY = "bamitbach-favorites-v1";
 const DRAFT_KEY = "bamitbach-draft-v1";
+const CONFIG = window.RECIPE_APP_CONFIG || {};
+const SHARED_ENABLED = Boolean(CONFIG.supabaseUrl && CONFIG.supabaseAnonKey);
+const API_BASE = (CONFIG.supabaseUrl || "").replace(/\/$/, "");
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const safeJSON = (value, fallback) => { try { return JSON.parse(value) ?? fallback; } catch { return fallback; } };
 const escapeHTML = (value = "") => String(value).replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
 
-let customRecipes = safeJSON(localStorage.getItem(STORAGE_KEY), []);
+let customRecipes = SHARED_ENABLED ? [] : safeJSON(localStorage.getItem(STORAGE_KEY), []);
 let favorites = new Set(safeJSON(localStorage.getItem(FAVORITES_KEY), []));
 let selectedCategory = "הכול";
+let selectedTag = "";
 let currentView = "all";
 let uploadedImage = "";
 let saveTimer;
 const allRecipes = () => [...customRecipes, ...STARTER_RECIPES];
+
+
+function setSyncStatus(message, isError = false) {
+  const status = $("#sync-status");
+  status.textContent = message;
+  status.style.color = isError ? "#a52d32" : "";
+}
+
+async function supabaseRequest(path, options = {}) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      apikey: CONFIG.supabaseAnonKey,
+      Authorization: `Bearer ${CONFIG.supabaseAnonKey}`,
+      ...(options.headers || {})
+    }
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Shared database request failed (${response.status}): ${detail}`);
+  }
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+function normalizeSharedRecipe(row) {
+  return {
+    id: row.id, title: row.title, summary: row.summary || "מתכון ביתי שכדאי לשמור.",
+    category: row.category || "אחר", time: row.time_minutes || 30,
+    difficulty: row.difficulty || "קל", image: row.image_url || "",
+    ingredients: Array.isArray(row.ingredients) ? row.ingredients : [],
+    steps: Array.isArray(row.steps) ? row.steps : [], tags: Array.isArray(row.tags) ? row.tags : [],
+    notes: row.notes || "", video: row.video_url || "", createdAt: row.created_at
+  };
+}
+
+async function loadSharedRecipes() {
+  if (!SHARED_ENABLED) {
+    setSyncStatus("מצב מקומי — יש לחבר מסד נתונים כדי לשתף מתכונים בין משתמשים.");
+    renderTagFilters(); renderRecipes(); return;
+  }
+  setSyncStatus("טוענים מתכונים משותפים…");
+  try {
+    const rows = await supabaseRequest("/rest/v1/recipes?select=*&order=created_at.desc&limit=200");
+    customRecipes = rows.map(normalizeSharedRecipe);
+    setSyncStatus(""); renderTagFilters(); renderRecipes();
+  } catch (error) {
+    console.error(error); setSyncStatus("לא הצלחנו לטעון את המתכונים המשותפים. נסו לרענן.", true);
+    renderTagFilters(); renderRecipes();
+  }
+}
+
+async function uploadSharedImage(dataUrl) {
+  if (!dataUrl) return "";
+  const blob = await fetch(dataUrl).then(response => response.blob());
+  const fileName = `${Date.now()}-${crypto.randomUUID()}.jpg`;
+  await supabaseRequest(`/storage/v1/object/recipe-images/${fileName}`, {
+    method: "POST", headers: { "Content-Type": "image/jpeg", "x-upsert": "false" }, body: blob
+  });
+  return `${API_BASE}/storage/v1/object/public/recipe-images/${fileName}`;
+}
+
+async function createSharedRecipe(recipe) {
+  const rows = await supabaseRequest("/rest/v1/recipes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Prefer: "return=representation" },
+    body: JSON.stringify({
+      title: recipe.title, summary: recipe.summary, category: recipe.category,
+      time_minutes: recipe.time, difficulty: recipe.difficulty, image_url: recipe.image,
+      ingredients: recipe.ingredients, steps: recipe.steps, tags: recipe.tags,
+      notes: recipe.notes, video_url: recipe.video || null
+    })
+  });
+  return normalizeSharedRecipe(rows[0]);
+}
 
 function showToast(message) {
   const toast = $("#toast");
@@ -69,6 +148,7 @@ function showToast(message) {
 
 function recipeCard(recipe) {
   const saved = favorites.has(recipe.id);
+  const tagList = (recipe.tags || []).slice(0, 3).map(tag => `<span class="recipe-tag">${escapeHTML(tag)}</span>`).join("");
   const image = recipe.image
     ? `<img class="card-image" src="${escapeHTML(recipe.image)}" alt="${escapeHTML(recipe.title)}" loading="lazy">`
     : `<div class="card-placeholder" aria-hidden="true">🍲</div>`;
@@ -77,7 +157,7 @@ function recipeCard(recipe) {
     ${image}
     <div class="card-body">
       <div class="card-meta"><span>${escapeHTML(recipe.category)}</span><span>•</span><span>${recipe.time} דקות</span></div>
-      <h3>${escapeHTML(recipe.title)}</h3><p>${escapeHTML(recipe.summary || "מתכון ביתי שכדאי לשמור.")}</p>
+      <h3>${escapeHTML(recipe.title)}</h3>${tagList ? `<div class="recipe-tags">${tagList}</div>` : ""}<p>${escapeHTML(recipe.summary || "מתכון ביתי שכדאי לשמור.")}</p>
       <div class="card-bottom"><span>רמת קושי: <strong>${escapeHTML(recipe.difficulty)}</strong></span><b>למתכון ←</b></div>
     </div>
   </article>`;
@@ -86,23 +166,30 @@ function recipeCard(recipe) {
 function renderRecipes() {
   const query = $("#search").value.trim().toLowerCase();
   let recipes = allRecipes().filter(recipe => {
-    const haystack = [recipe.title, recipe.summary, ...(recipe.ingredients || [])].join(" ").toLowerCase();
+    const haystack = [recipe.title, recipe.summary, ...(recipe.ingredients || []), ...(recipe.tags || [])].join(" ").toLowerCase();
     const categoryMatch = selectedCategory === "הכול" ||
       (selectedCategory === "מהיר" ? recipe.time <= 20 : recipe.category === selectedCategory);
-    return haystack.includes(query) && categoryMatch && (currentView !== "favorites" || favorites.has(recipe.id));
+    const tagMatch = !selectedTag || (recipe.tags || []).includes(selectedTag);
+    return haystack.includes(query) && categoryMatch && tagMatch && (currentView !== "favorites" || favorites.has(recipe.id));
   });
   $("#recipe-grid").innerHTML = recipes.map(recipeCard).join("");
   $("#empty-state").hidden = recipes.length > 0;
   $("#recipe-count").textContent = recipes.length === 1 ? "מתכון אחד" : `${recipes.length} מתכונים`;
 }
 
+function renderTagFilters() {
+  const tags = [...new Set(allRecipes().flatMap(recipe => recipe.tags || []))].sort((a, b) => a.localeCompare(b, "he"));
+  $("#tag-filters").innerHTML = tags.length ? `<button class="tag-chip ${!selectedTag ? "active" : ""}" data-tag="">כל התגיות</button>${tags.map(tag => `<button class="tag-chip ${selectedTag === tag ? "active" : ""}" data-tag="${escapeHTML(tag)}">#${escapeHTML(tag)}</button>`).join("")}` : "";
+}
+
 function openRecipe(id) {
   const recipe = allRecipes().find(item => item.id === id);
   if (!recipe) return;
   const image = recipe.image ? `<img class="detail-image" src="${escapeHTML(recipe.image)}" alt="${escapeHTML(recipe.title)}">` : "";
+  const detailTags = (recipe.tags || []).map(tag => `<span class="detail-tag">#${escapeHTML(tag)}</span>`).join("");
   $("#recipe-detail").innerHTML = `${image}<div class="detail-content">
     <span class="eyebrow">${escapeHTML(recipe.category)}</span><h1 id="detail-title">${escapeHTML(recipe.title)}</h1>
-    <p class="detail-summary">${escapeHTML(recipe.summary)}</p>
+    <p class="detail-summary">${escapeHTML(recipe.summary)}</p>${detailTags ? `<div class="detail-tags">${detailTags}</div>` : ""}
     <div class="detail-facts"><span>זמן כולל<b>${recipe.time} דקות</b></span><span>רמת קושי<b>${escapeHTML(recipe.difficulty)}</b></span><span>מצרכים<b>${recipe.ingredients.length} פריטים</b></span></div>
     <div class="detail-columns"><section><h2>מה צריך?</h2><ul class="ingredients">${recipe.ingredients.map(x => `<li>${escapeHTML(x)}</li>`).join("")}</ul></section>
     <section><h2>איך מכינים?</h2><ol class="instructions">${recipe.steps.map(x => `<li>${escapeHTML(x)}</li>`).join("")}</ol>
@@ -215,6 +302,10 @@ $("#recipe-grid").addEventListener("click", event => {
 });
 $("#recipe-grid").addEventListener("keydown", event => { if ((event.key === "Enter" || event.key === " ") && event.target.matches(".recipe-card")) openRecipe(event.target.dataset.id); });
 $("#search").addEventListener("input", renderRecipes);
+$("#tag-filters").addEventListener("click", event => {
+  const button = event.target.closest("[data-tag]"); if (!button) return;
+  selectedTag = button.dataset.tag; renderTagFilters(); renderRecipes();
+});
 $$('[data-open-form]').forEach(button => button.addEventListener("click", openForm));
 $$('[data-close-form]').forEach(button => button.addEventListener("click", () => closeLayer("#form-drawer")));
 $$('[data-close-modal]').forEach(button => button.addEventListener("click", () => closeLayer("#recipe-modal")));
@@ -243,7 +334,7 @@ $("#image-input").addEventListener("change", async event => {
     $("#image-preview").src = uploadedImage; $("#image-preview").hidden = false; $("#upload-copy").hidden = true;
   } catch (error) { showToast(error.message); event.target.value = ""; }
 });
-$("#recipe-form").addEventListener("submit", event => {
+$("#recipe-form").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.currentTarget;
   const data = new FormData(form);
@@ -253,17 +344,32 @@ $("#recipe-form").addEventListener("submit", event => {
   const recipe = {
     id: `recipe-${Date.now()}`, title: data.get("title").trim(), summary: data.get("summary").trim() || "מתכון ביתי שכדאי לשמור.",
     category: data.get("category"), time: Number(data.get("time")) || 30, difficulty: data.get("difficulty"),
-    image: uploadedImage, ingredients, steps, notes: data.get("notes").trim(), video: data.get("video").trim(), createdAt: new Date().toISOString()
+    image: uploadedImage, ingredients, steps,
+    tags: [...new Set((data.get("tags") || "").split(/[,#]/).map(tag => tag.trim()).filter(Boolean))].slice(0, 8),
+    notes: data.get("notes").trim(), video: data.get("video").trim(), createdAt: new Date().toISOString()
   };
-  customRecipes.unshift(recipe);
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(customRecipes)); }
-  catch { customRecipes.shift(); showToast("אין מספיק מקום לשמירת התמונה. נסו תמונה קטנה יותר."); return; }
-  localStorage.removeItem(DRAFT_KEY); closeLayer("#form-drawer"); renderRecipes(); showToast("המתכון נוסף בהצלחה! 🎉");
-  setTimeout(() => openRecipe(recipe.id), 350);
+  const submit = $(".submit-btn", form); submit.disabled = true; submit.textContent = "שומרים…";
+  try {
+    let savedRecipe = recipe;
+    if (SHARED_ENABLED) {
+      setSyncStatus("שומרים את המתכון לכולם…");
+      savedRecipe.image = await uploadSharedImage(uploadedImage);
+      savedRecipe = await createSharedRecipe(savedRecipe);
+      setSyncStatus("");
+    } else {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify([recipe, ...customRecipes])); }
+      catch { throw new Error("אין מספיק מקום לשמירת התמונה. נסו תמונה קטנה יותר."); }
+    }
+    customRecipes.unshift(savedRecipe); localStorage.removeItem(DRAFT_KEY);
+    closeLayer("#form-drawer"); renderTagFilters(); renderRecipes(); showToast("המתכון נוסף וגלוי לכולם! 🎉");
+    setTimeout(() => openRecipe(savedRecipe.id), 350);
+  } catch (error) {
+    console.error(error); setSyncStatus("שמירת המתכון נכשלה. נסו שוב.", true); showToast("לא הצלחנו לשמור את המתכון");
+  } finally { submit.disabled = false; submit.textContent = "שמירת המתכון"; }
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
   if (!$("#form-drawer").hidden) closeLayer("#form-drawer"); else if (!$("#recipe-modal").hidden) closeLayer("#recipe-modal");
 });
 
-renderRecipes();
+loadSharedRecipes();
