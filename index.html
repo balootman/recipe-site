@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f7f2e8">
+  <title>במטבח שלי — מתכונים ששווה לשמור</title>
+  <meta name="description" content="אוספים, שומרים ומשתפים מתכונים ביתיים בפשטות.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&family=Frank+Ruhl+Libre:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#" aria-label="במטבח שלי — דף הבית">
+      <span class="brand-mark" aria-hidden="true">ב</span>
+      <span><strong>במטבח שלי</strong><small>מתכונים שחוזרים אליהם</small></span>
+    </a>
+    <nav aria-label="ניווט ראשי">
+      <button class="nav-link active" data-view="all">כל המתכונים</button>
+      <button class="nav-link" data-view="favorites"><span aria-hidden="true">♡</span> שמורים</button>
+    </nav>
+    <button class="primary-btn header-add" data-open-form><span aria-hidden="true">＋</span> מתכון חדש</button>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <span class="eyebrow">המקום הטעים שלך</span>
+        <h1 id="hero-title">כל המתכונים שאוהבים,<br><em>במקום אחד.</em></h1>
+        <p>אוספים מתכונים ביתיים, שומרים את המועדפים ומוסיפים בקלות את המנה הבאה.</p>
+        <div class="hero-actions">
+          <button class="primary-btn" data-open-form>הוספת מתכון <span aria-hidden="true">←</span></button>
+          <a class="text-link" href="#recipes">לכל המתכונים <span aria-hidden="true">↓</span></a>
+        </div>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <div class="sun"></div>
+        <span class="herb herb-one">⌇</span><span class="herb herb-two">⌇</span>
+        <div class="plate"><span>טעים<br>בבית</span></div>
+      </div>
+    </section>
+
+    <section class="browse" id="recipes" aria-labelledby="recipes-title">
+      <div class="section-heading">
+        <div><span class="eyebrow">מה מבשלים היום?</span><h2 id="recipes-title">מתכונים שכדאי לנסות</h2></div>
+        <p id="recipe-count" aria-live="polite"></p>
+      </div>
+
+      <div class="toolbar">
+        <label class="search-box">
+          <span aria-hidden="true">⌕</span>
+          <span class="sr-only">חיפוש מתכון</span>
+          <input id="search" type="search" placeholder="חיפוש לפי שם או מצרך..." autocomplete="off">
+        </label>
+        <div class="filters" role="group" aria-label="סינון לפי קטגוריה">
+          <button class="filter-chip active" data-category="הכול">הכול</button>
+          <button class="filter-chip" data-category="עיקריות">עיקריות</button>
+          <button class="filter-chip" data-category="מהיר">עד 20 דקות</button>
+        </div>
+      </div>
+
+      <div class="recipe-grid" id="recipe-grid"></div>
+      <div class="empty-state" id="empty-state" hidden>
+        <div aria-hidden="true">🍽️</div><h3>עוד לא מצאנו התאמה</h3>
+        <p>אפשר לנסות חיפוש אחר או להוסיף מתכון חדש משלך.</p>
+        <button class="primary-btn" data-open-form>הוספת מתכון</button>
+      </div>
+    </section>
+
+    <section class="cta-strip">
+      <div><span aria-hidden="true">✦</span><h2>יש לך מתכון מנצח?</h2><p>כמה דקות והוא שמור כאן, מסודר ויפה.</p></div>
+      <button class="light-btn" data-open-form>בואו נוסיף אותו <span aria-hidden="true">←</span></button>
+    </section>
+  </main>
+
+  <footer><span class="footer-brand">במטבח שלי</span><p>נבנה באהבה לאוכל ביתי ♥</p><a href="#">חזרה למעלה ↑</a></footer>
+
+  <div class="modal-layer" id="recipe-modal" hidden>
+    <div class="modal-backdrop" data-close-modal></div>
+    <article class="recipe-modal" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+      <button class="icon-btn close-btn" data-close-modal aria-label="סגירת המתכון">×</button>
+      <div id="recipe-detail"></div>
+    </article>
+  </div>
+
+  <div class="drawer-layer" id="form-drawer" hidden>
+    <div class="modal-backdrop" data-close-form></div>
+    <aside class="form-drawer" role="dialog" aria-modal="true" aria-labelledby="form-title">
+      <header class="drawer-header">
+        <div><span class="eyebrow">המתכון שלך</span><h2 id="form-title">הוספת מתכון חדש</h2></div>
+        <button class="icon-btn" data-close-form aria-label="סגירת הטופס">×</button>
+      </header>
+      <form id="recipe-form">
+        <section class="form-section">
+          <span class="step-label">01 — הפרטים הבסיסיים</span>
+          <label>שם המתכון <b>*</b><input name="title" required maxlength="100" placeholder="למשל: הפסטה של יום שישי"></label>
+          <label>תיאור קצר <textarea name="summary" maxlength="180" rows="2" placeholder="משפט קטן שפותח את התיאבון"></textarea></label>
+          <div class="form-row thirds">
+            <label>קטגוריה<select name="category"><option>עיקריות</option><option>סלטים</option><option>מאפים</option><option>קינוחים</option><option>אחר</option></select></label>
+            <label>זמן בדקות <input name="time" type="number" min="1" max="999" value="30"></label>
+            <label>רמת קושי<select name="difficulty"><option>קל</option><option>בינוני</option><option>למתקדמים</option></select></label>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <span class="step-label">02 — תמונה</span>
+          <label class="image-upload" id="image-upload">
+            <input id="image-input" name="image" type="file" accept="image/jpeg,image/png,image/webp">
+            <img id="image-preview" alt="תצוגה מקדימה" hidden>
+            <span id="upload-copy"><b>📷</b><strong>העלאת תמונה של המנה</strong><small>JPG, PNG או WEBP עד 3MB</small></span>
+          </label>
+        </section>
+
+        <section class="form-section">
+          <span class="step-label">03 — מה צריך?</span>
+          <div id="ingredients-list" class="dynamic-list"></div>
+          <button class="add-row-btn" type="button" data-add-ingredient>＋ הוספת מצרך</button>
+        </section>
+
+        <section class="form-section">
+          <span class="step-label">04 — איך מכינים?</span>
+          <div id="steps-list" class="dynamic-list"></div>
+          <button class="add-row-btn" type="button" data-add-step>＋ הוספת שלב</button>
+        </section>
+
+        <section class="form-section">
+          <span class="step-label">05 — עוד משהו?</span>
+          <label>הערות <textarea name="notes" rows="2" placeholder="טיפ קטן, תחליף אפשרי או דרך הגשה"></textarea></label>
+          <label>קישור לסרטון <input name="video" type="url" placeholder="https://..."></label>
+        </section>
+
+        <div class="form-actions">
+          <button class="primary-btn submit-btn" type="submit">שמירת המתכון <span aria-hidden="true">←</span></button>
+          <button class="text-btn" type="button" data-close-form>ביטול</button>
+          <span class="draft-note" id="draft-note">הטיוטה נשמרת אוטומטית</span>
+        </div>
+      </form>
+    </aside>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
