@@ -1,7 +1,7 @@
 const STARTER_RECIPES = [
   {
     id: "starter-chicken-soy",
-    title: "חזה עוף רך ב־10 דקות",
+    title: "חזה עוף רך ב־10 דקות", author: "המתכונים שלי",
     summary: "עסיסי, מהיר וטעים גם למחרת במיקרו — ברוטב סויה, שום ותבלינים.",
     category: "עיקריות", time: 10, difficulty: "קל", tags: ["מהיר", "עוף", "מחבת"], image: "assets/chicken-soy.png",
     ingredients: [
@@ -22,7 +22,7 @@ const STARTER_RECIPES = [
   },
   {
     id: "starter-chicken-sweet-potato",
-    title: "חזה עוף, בטטה וערמונים בסיר אחד",
+    title: "חזה עוף, בטטה וערמונים בסיר אחד", author: "המתכונים שלי",
     summary: "ארוחה ביתית קלה בסיר אחד, עם בטטה, ערמונים ורוטב מתקתק.",
     category: "עיקריות", time: 45, difficulty: "קל", tags: ["עוף", "סיר אחד", "ארוחת ערב"], image: "assets/chicken-sweet-potato.png",
     ingredients: [
@@ -46,6 +46,8 @@ const STARTER_RECIPES = [
 const STORAGE_KEY = "bamitbach-recipes-v1";
 const FAVORITES_KEY = "bamitbach-favorites-v1";
 const DRAFT_KEY = "bamitbach-draft-v1";
+const AUTHOR_KEY = "bamitbach-author-v1";
+const EDIT_TOKENS_KEY = "bamitbach-edit-tokens-v1";
 const CONFIG = window.RECIPE_APP_CONFIG || {};
 const SHARED_ENABLED = Boolean(CONFIG.supabaseUrl && CONFIG.supabaseAnonKey);
 const API_BASE = (CONFIG.supabaseUrl || "").replace(/\/$/, "");
@@ -53,6 +55,14 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const safeJSON = (value, fallback) => { try { return JSON.parse(value) ?? fallback; } catch { return fallback; } };
 const escapeHTML = (value = "") => String(value).replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+function safeExternalUrl(value) {
+  try { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) ? url.href : ""; }
+  catch { return ""; }
+}
+function safeImageUrl(value) {
+  if (/^assets\/[a-z0-9._/-]+$/i.test(value || "")) return value;
+  return safeExternalUrl(value);
+}
 
 let customRecipes = SHARED_ENABLED ? [] : safeJSON(localStorage.getItem(STORAGE_KEY), []);
 let favorites = new Set(safeJSON(localStorage.getItem(FAVORITES_KEY), []));
@@ -60,8 +70,20 @@ let selectedCategory = "הכול";
 let selectedTag = "";
 let currentView = "all";
 let uploadedImage = "";
+let editingRecipeId = null;
+let editingOriginalImage = "";
+let editTokens = safeJSON(localStorage.getItem(EDIT_TOKENS_KEY), {});
 let saveTimer;
 const allRecipes = () => [...customRecipes, ...STARTER_RECIPES];
+const createEditToken = () => `${crypto.randomUUID()}${crypto.randomUUID()}`;
+function saveEditToken(recipeId, token) {
+  editTokens[recipeId] = token;
+  localStorage.setItem(EDIT_TOKENS_KEY, JSON.stringify(editTokens));
+}
+function removeEditToken(recipeId) {
+  delete editTokens[recipeId];
+  localStorage.setItem(EDIT_TOKENS_KEY, JSON.stringify(editTokens));
+}
 
 
 function setSyncStatus(message, isError = false) {
@@ -89,7 +111,7 @@ async function supabaseRequest(path, options = {}) {
 
 function normalizeSharedRecipe(row) {
   return {
-    id: row.id, title: row.title, summary: row.summary || "מתכון ביתי שכדאי לשמור.",
+    id: row.id, title: row.title, author: row.author_name || "אנונימי", summary: row.summary || "מתכון ביתי שכדאי לשמור.",
     category: row.category || "אחר", time: row.time_minutes || 30,
     difficulty: row.difficulty || "קל", image: row.image_url || "",
     ingredients: Array.isArray(row.ingredients) ? row.ingredients : [],
@@ -106,9 +128,11 @@ async function migrateLocalRecipes() {
   let migrated = 0;
   setSyncStatus(`מעבירים ${pending.length} מתכונים מהמכשיר לענן…`);
   for (const recipe of [...pending]) {
-    const candidate = { ...recipe, tags: recipe.tags || [] };
+    const candidate = { ...recipe, author: recipe.author || localStorage.getItem(AUTHOR_KEY) || "אורח", tags: recipe.tags || [] };
     if (candidate.image?.startsWith("data:")) candidate.image = await uploadSharedImage(candidate.image);
-    await createSharedRecipe(candidate);
+    const token = createEditToken();
+    const saved = await createSharedRecipe(candidate, token);
+    saveEditToken(saved.id, token);
     pending = pending.filter(item => item.id !== recipe.id);
     pending.length ? localStorage.setItem(STORAGE_KEY, JSON.stringify(pending)) : localStorage.removeItem(STORAGE_KEY);
     migrated += 1;
@@ -146,18 +170,37 @@ async function uploadSharedImage(dataUrl) {
   return `${API_BASE}/storage/v1/object/public/recipe-images/${fileName}`;
 }
 
-async function createSharedRecipe(recipe) {
-  const rows = await supabaseRequest("/rest/v1/recipes", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Prefer: "return=representation" },
-    body: JSON.stringify({
-      title: recipe.title, summary: recipe.summary, category: recipe.category,
-      time_minutes: recipe.time, difficulty: recipe.difficulty, image_url: recipe.image,
-      ingredients: recipe.ingredients, steps: recipe.steps, tags: recipe.tags,
-      notes: recipe.notes, video_url: recipe.video || null
-    })
+function recipeRpcPayload(recipe) {
+  return {
+    p_author_name: recipe.author, p_title: recipe.title, p_summary: recipe.summary,
+    p_category: recipe.category, p_time_minutes: recipe.time,
+    p_difficulty: recipe.difficulty, p_image_url: recipe.image,
+    p_ingredients: recipe.ingredients, p_steps: recipe.steps, p_tags: recipe.tags,
+    p_notes: recipe.notes, p_video_url: recipe.video || null
+  };
+}
+
+async function createSharedRecipe(recipe, token) {
+  const rows = await supabaseRequest("/rest/v1/rpc/create_recipe", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...recipeRpcPayload(recipe), p_edit_token: token })
   });
   return normalizeSharedRecipe(rows[0]);
+}
+
+async function updateSharedRecipe(recipe, token) {
+  const rows = await supabaseRequest("/rest/v1/rpc/update_recipe", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...recipeRpcPayload(recipe), p_id: recipe.id, p_edit_token: token })
+  });
+  return normalizeSharedRecipe(rows[0]);
+}
+
+async function deleteSharedRecipe(id, token) {
+  return supabaseRequest("/rest/v1/rpc/delete_recipe", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ p_id: id, p_edit_token: token })
+  });
 }
 
 function showToast(message) {
@@ -171,8 +214,9 @@ function showToast(message) {
 function recipeCard(recipe) {
   const saved = favorites.has(recipe.id);
   const tagList = (recipe.tags || []).slice(0, 3).map(tag => `<span class="recipe-tag">${escapeHTML(tag)}</span>`).join("");
-  const image = recipe.image
-    ? `<img class="card-image" src="${escapeHTML(recipe.image)}" alt="${escapeHTML(recipe.title)}" loading="lazy">`
+  const imageUrl = safeImageUrl(recipe.image);
+  const image = imageUrl
+    ? `<img class="card-image" src="${escapeHTML(imageUrl)}" alt="${escapeHTML(recipe.title)}" loading="lazy">`
     : `<div class="card-placeholder" aria-hidden="true">🍲</div>`;
   return `<article class="recipe-card" data-id="${escapeHTML(recipe.id)}" tabindex="0" aria-label="פתיחת המתכון ${escapeHTML(recipe.title)}">
     <button class="favorite-btn ${saved ? "saved" : ""}" data-favorite="${escapeHTML(recipe.id)}" aria-label="${saved ? "הסרה מהשמורים" : "שמירת המתכון"}" aria-pressed="${saved}">${saved ? "♥" : "♡"}</button>
@@ -180,7 +224,7 @@ function recipeCard(recipe) {
     <div class="card-body">
       <div class="card-meta"><span>${escapeHTML(recipe.category)}</span><span>•</span><span>${recipe.time} דקות</span></div>
       <h3>${escapeHTML(recipe.title)}</h3>${tagList ? `<div class="recipe-tags">${tagList}</div>` : ""}<p>${escapeHTML(recipe.summary || "מתכון ביתי שכדאי לשמור.")}</p>
-      <div class="card-bottom"><span>רמת קושי: <strong>${escapeHTML(recipe.difficulty)}</strong></span><b>למתכון ←</b></div>
+      <div class="card-bottom"><span>מאת <strong>${escapeHTML(recipe.author || "אנונימי")}</strong></span><b>למתכון ←</b></div>
     </div>
   </article>`;
 }
@@ -207,16 +251,20 @@ function renderTagFilters() {
 function openRecipe(id) {
   const recipe = allRecipes().find(item => item.id === id);
   if (!recipe) return;
-  const image = recipe.image ? `<img class="detail-image" src="${escapeHTML(recipe.image)}" alt="${escapeHTML(recipe.title)}">` : "";
+  const imageUrl = safeImageUrl(recipe.image);
+  const image = imageUrl ? `<img class="detail-image" src="${escapeHTML(imageUrl)}" alt="${escapeHTML(recipe.title)}">` : "";
   const detailTags = (recipe.tags || []).map(tag => `<span class="detail-tag">#${escapeHTML(tag)}</span>`).join("");
+  const canManage = Boolean(editTokens[recipe.id]);
+  const manageActions = canManage ? `<div class="recipe-actions"><button class="secondary-btn" data-edit-recipe="${escapeHTML(recipe.id)}">עריכת המתכון</button><button class="danger-btn" data-delete-recipe="${escapeHTML(recipe.id)}">מחיקה</button></div>` : "";
   $("#recipe-detail").innerHTML = `${image}<div class="detail-content">
     <span class="eyebrow">${escapeHTML(recipe.category)}</span><h1 id="detail-title">${escapeHTML(recipe.title)}</h1>
-    <p class="detail-summary">${escapeHTML(recipe.summary)}</p>${detailTags ? `<div class="detail-tags">${detailTags}</div>` : ""}
+    <p class="detail-author">מתכון של <strong>${escapeHTML(recipe.author || "אנונימי")}</strong></p>
+    <p class="detail-summary">${escapeHTML(recipe.summary)}</p>${detailTags ? `<div class="detail-tags">${detailTags}</div>` : ""}${manageActions}
     <div class="detail-facts"><span>זמן כולל<b>${recipe.time} דקות</b></span><span>רמת קושי<b>${escapeHTML(recipe.difficulty)}</b></span><span>מצרכים<b>${recipe.ingredients.length} פריטים</b></span></div>
     <div class="detail-columns"><section><h2>מה צריך?</h2><ul class="ingredients">${recipe.ingredients.map(x => `<li>${escapeHTML(x)}</li>`).join("")}</ul></section>
     <section><h2>איך מכינים?</h2><ol class="instructions">${recipe.steps.map(x => `<li>${escapeHTML(x)}</li>`).join("")}</ol>
     ${recipe.notes ? `<div class="detail-note"><strong>טיפ קטן</strong><br>${escapeHTML(recipe.notes)}</div>` : ""}
-    ${recipe.video ? `<div class="video-link"><a class="primary-btn" href="${escapeHTML(recipe.video)}" target="_blank" rel="noopener">צפייה בסרטון ההדרכה ↗</a></div>` : ""}
+    ${safeExternalUrl(recipe.video) ? `<div class="video-link"><a class="primary-btn" href="${escapeHTML(safeExternalUrl(recipe.video))}" target="_blank" rel="noopener noreferrer">צפייה בסרטון ההדרכה ↗</a></div>` : ""}
     </section></div></div>`;
   $("#recipe-modal").hidden = false;
   document.body.classList.add("modal-open");
@@ -260,6 +308,7 @@ function collectDraft() {
 }
 
 function saveDraft() {
+  if (editingRecipeId) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     const draft = collectDraft();
@@ -289,10 +338,35 @@ function resetForm(loadDraft = true) {
 }
 
 function openForm() {
+  editingRecipeId = null; editingOriginalImage = "";
   resetForm(true);
+  const form = $("#recipe-form");
+  if (!form.elements.author.value) form.elements.author.value = localStorage.getItem(AUTHOR_KEY) || "";
+  $("#form-title").textContent = "מתכון חדש";
+  $(".submit-btn", form).textContent = "שמירת המתכון";
   $("#form-drawer").hidden = false;
   document.body.classList.add("modal-open");
-  setTimeout(() => $('[name="title"]', $("#recipe-form")).focus(), 100);
+  setTimeout(() => form.elements.title.focus(), 100);
+}
+
+function openEditForm(id) {
+  const recipe = allRecipes().find(item => item.id === id);
+  if (!recipe || !editTokens[id]) return;
+  editingRecipeId = id; editingOriginalImage = recipe.image || "";
+  resetForm(false);
+  const form = $("#recipe-form");
+  form.elements.author.value = recipe.author || ""; form.elements.title.value = recipe.title;
+  form.elements.summary.value = recipe.summary || ""; form.elements.tags.value = (recipe.tags || []).join(", ");
+  form.elements.category.value = recipe.category; form.elements.time.value = recipe.time;
+  form.elements.difficulty.value = recipe.difficulty; form.elements.notes.value = recipe.notes || "";
+  form.elements.video.value = recipe.video || "";
+  $("#ingredients-list").innerHTML = ""; recipe.ingredients.forEach(value => addDynamicRow("ingredient", value));
+  $("#steps-list").innerHTML = ""; recipe.steps.forEach(value => addDynamicRow("step", value));
+  if (recipe.image) { $("#image-preview").src = recipe.image; $("#image-preview").hidden = false; $("#upload-copy").hidden = true; }
+  if (recipe.notes || recipe.video) $(".optional-fields").open = true;
+  $("#form-title").textContent = "עריכת מתכון"; $(".submit-btn", form).textContent = "שמירת שינויים";
+  closeLayer("#recipe-modal"); $("#form-drawer").hidden = false; document.body.classList.add("modal-open");
+  setTimeout(() => form.elements.title.focus(), 100);
 }
 
 function resizeImage(file) {
@@ -356,6 +430,21 @@ $("#image-input").addEventListener("change", async event => {
     $("#image-preview").src = uploadedImage; $("#image-preview").hidden = false; $("#upload-copy").hidden = true;
   } catch (error) { showToast(error.message); event.target.value = ""; }
 });
+$("#recipe-detail").addEventListener("click", async event => {
+  const editButton = event.target.closest("[data-edit-recipe]");
+  if (editButton) { openEditForm(editButton.dataset.editRecipe); return; }
+  const deleteButton = event.target.closest("[data-delete-recipe]");
+  if (!deleteButton) return;
+  const id = deleteButton.dataset.deleteRecipe;
+  if (!confirm("למחוק את המתכון? אי אפשר לבטל את הפעולה.")) return;
+  deleteButton.disabled = true; deleteButton.textContent = "מוחקים…";
+  try {
+    if (SHARED_ENABLED) await deleteSharedRecipe(id, editTokens[id]);
+    customRecipes = customRecipes.filter(item => item.id !== id);
+    if (!SHARED_ENABLED) localStorage.setItem(STORAGE_KEY, JSON.stringify(customRecipes));
+    removeEditToken(id); closeLayer("#recipe-modal"); renderTagFilters(); renderRecipes(); showToast("המתכון נמחק");
+  } catch (error) { console.error(error); showToast("לא הצלחנו למחוק את המתכון"); deleteButton.disabled = false; deleteButton.textContent = "מחיקה"; }
+});
 $("#recipe-form").addEventListener("submit", async event => {
   event.preventDefault();
   const form = event.currentTarget;
@@ -364,7 +453,7 @@ $("#recipe-form").addEventListener("submit", async event => {
   const steps = $$('[name="step"]', form).map(x => x.value.trim()).filter(Boolean);
   if (!ingredients.length || !steps.length) { showToast("צריך להוסיף לפחות מצרך ושלב הכנה אחד"); return; }
   const recipe = {
-    id: `recipe-${Date.now()}`, title: data.get("title").trim(), summary: data.get("summary").trim() || "מתכון ביתי שכדאי לשמור.",
+    id: editingRecipeId || `recipe-${Date.now()}`, author: data.get("author").trim(), title: data.get("title").trim(), summary: data.get("summary").trim() || "מתכון ביתי שכדאי לשמור.",
     category: data.get("category"), time: Number(data.get("time")) || 30, difficulty: data.get("difficulty"),
     image: uploadedImage, ingredients, steps,
     tags: [...new Set((data.get("tags") || "").split(/[,#]/).map(tag => tag.trim()).filter(Boolean))].slice(0, 8),
@@ -373,19 +462,27 @@ $("#recipe-form").addEventListener("submit", async event => {
   const submit = $(".submit-btn", form); submit.disabled = true; submit.textContent = "שומרים…";
   try {
     let savedRecipe = recipe;
-    let sharedSave = SHARED_ENABLED;
-    if (SHARED_ENABLED) {
-      setSyncStatus("שומרים את המתכון לכולם…");
-      savedRecipe.image = await uploadSharedImage(uploadedImage);
-      savedRecipe = await createSharedRecipe(savedRecipe);
-      setSyncStatus("");
+    const sharedSave = SHARED_ENABLED;
+    const isEditing = Boolean(editingRecipeId);
+    if (isEditing) {
+      savedRecipe.image = uploadedImage ? (SHARED_ENABLED ? await uploadSharedImage(uploadedImage) : uploadedImage) : editingOriginalImage;
+      if (SHARED_ENABLED) savedRecipe = await updateSharedRecipe(savedRecipe, editTokens[editingRecipeId]);
+      customRecipes = customRecipes.map(item => item.id === editingRecipeId ? savedRecipe : item);
     } else {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify([recipe, ...customRecipes])); }
-      catch { throw new Error("אין מספיק מקום לשמירת התמונה. נסו תמונה קטנה יותר."); }
+      const token = createEditToken();
+      if (SHARED_ENABLED) {
+        setSyncStatus("שומרים את המתכון לכולם…");
+        savedRecipe.image = await uploadSharedImage(uploadedImage);
+        savedRecipe = await createSharedRecipe(savedRecipe, token);
+      }
+      saveEditToken(savedRecipe.id, token);
+      customRecipes.unshift(savedRecipe);
     }
-    customRecipes.unshift(savedRecipe); localStorage.removeItem(DRAFT_KEY);
+    if (!SHARED_ENABLED) localStorage.setItem(STORAGE_KEY, JSON.stringify(customRecipes));
+    localStorage.setItem(AUTHOR_KEY, recipe.author); localStorage.removeItem(DRAFT_KEY);
+    editingRecipeId = null; editingOriginalImage = ""; setSyncStatus(SHARED_ENABLED ? "מסונכרן לכל המכשירים" : "מצב מקומי", !SHARED_ENABLED);
     closeLayer("#form-drawer"); renderTagFilters(); renderRecipes();
-    showToast(sharedSave ? "המתכון נוסף וגלוי לכולם! 🎉" : "המתכון נשמר רק במכשיר הזה");
+    showToast(isEditing ? "השינויים נשמרו" : (sharedSave ? "המתכון נוסף וגלוי לכולם! 🎉" : "המתכון נשמר רק במכשיר הזה"));
     setTimeout(() => openRecipe(savedRecipe.id), 350);
   } catch (error) {
     console.error(error); setSyncStatus("שמירת המתכון נכשלה. נסו שוב.", true); showToast("לא הצלחנו לשמור את המתכון");
